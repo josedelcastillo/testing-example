@@ -1,0 +1,87 @@
+# Mismo flujo que .github/workflows/ci.yml, para Azure DevOps.
+trigger:
+  branches:
+    include: [main]
+pr:
+  branches:
+    include: ["*"]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  PYTHON_VERSION: "3.12"
+
+stages:
+  - stage: Lint
+    jobs:
+      - job: ruff
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+          - script: pip install -r requirements-dev.txt
+            displayName: Instalar dependencias
+          - script: |
+              ruff check .
+              ruff format --check .
+            displayName: Lint y formato
+
+  - stage: UnitTests
+    dependsOn: Lint
+    jobs:
+      - job: pytest_unit
+        strategy:
+          matrix:
+            py311: { PY: "3.11" }
+            py312: { PY: "3.12" }
+            py313: { PY: "3.13" }
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PY)
+          - script: pip install -r requirements-dev.txt
+            displayName: Instalar dependencias
+          - script: >
+              pytest tests/unit
+              --cov=app.pricing --cov=app.services --cov-fail-under=90
+              --cov-report=term-missing --junitxml=reports/unit.xml
+            displayName: Pruebas unitarias
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: reports/unit.xml
+              testRunTitle: Unit $(PY)
+
+  - stage: IntegrationTests
+    dependsOn: UnitTests
+    jobs:
+      - job: pytest_integration
+        variables:
+          DATABASE_URL: postgresql+psycopg://tienda:tienda@localhost:5432/tienda
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+          - script: docker compose up -d --wait db
+            displayName: Levantar PostgreSQL
+          - script: pip install -r requirements-dev.txt
+            displayName: Instalar dependencias
+          - script: >
+              pytest tests/integration -m integration
+              --cov=app --cov-fail-under=80
+              --cov-report=xml:reports/coverage.xml
+              --junitxml=reports/integration.xml
+            displayName: Pruebas de integración
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: reports/integration.xml
+              testRunTitle: Integration
+          - task: PublishCodeCoverageResults@2
+            condition: succeededOrFailed()
+            inputs:
+              summaryFileLocation: reports/coverage.xml
+          - script: docker compose down -v
+            condition: always()
+            displayName: Apagar PostgreSQL
