@@ -1,0 +1,72 @@
+# Pruebas de API de caja negra con Karate.
+# Pipeline independiente del CI: se puede ejecutar contra la app desplegada
+# localmente en el runner o contra cualquier ambiente (QA, staging).
+name: API Tests (Karate)
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "tests/karate/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "docker/**"
+      - "requirements.txt"
+      - ".github/workflows/api-tests-karate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "tests/karate/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "docker/**"
+      - "requirements.txt"
+      - ".github/workflows/api-tests-karate.yml"
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "URL del ambiente a probar (vacío = desplegar la app en el runner)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 6 * * *" # regresión diaria, 01:00 hora de Perú
+
+concurrency:
+  group: karate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Se pasa por variable de entorno, nunca interpolado en el script (evita inyección).
+  BASE_URL: ${{ inputs.base_url || 'http://localhost:8000' }}
+  DEPLOY_LOCAL: ${{ inputs.base_url == '' || inputs.base_url == null }}
+
+jobs:
+  karate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: tests/karate/pom.xml
+      - name: Desplegar app + PostgreSQL
+        if: env.DEPLOY_LOCAL == 'true'
+        run: docker compose up -d --build --wait
+      - name: Pruebas de API (Karate)
+        working-directory: tests/karate
+        run: mvn -B test -Dkarate.baseUrl="$BASE_URL"
+      - name: Logs de la app (si falló)
+        if: failure() && env.DEPLOY_LOCAL == 'true'
+        run: docker compose logs app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: karate-report
+          path: tests/karate/target/karate-reports/
+      - name: Apagar entorno
+        if: always() && env.DEPLOY_LOCAL == 'true'
+        run: docker compose down -v

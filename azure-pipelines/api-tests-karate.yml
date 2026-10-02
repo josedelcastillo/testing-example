@@ -1,0 +1,82 @@
+# Pruebas de API de caja negra con Karate (equivalente a
+# .github/workflows/api-tests-karate.yml). Pipeline independiente del CI.
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - app
+      - tests/karate
+      - Dockerfile
+      - docker-compose.yml
+      - docker
+      - requirements.txt
+      - azure-pipelines/api-tests-karate.yml
+pr:
+  branches:
+    include: ["*"]
+  paths:
+    include:
+      - app
+      - tests/karate
+      - Dockerfile
+      - docker-compose.yml
+      - docker
+      - requirements.txt
+      - azure-pipelines/api-tests-karate.yml
+
+schedules:
+  - cron: "0 6 * * *" # regresión diaria, 01:00 hora de Perú
+    displayName: Regresión diaria
+    branches:
+      include: [main]
+    always: true
+
+parameters:
+  - name: baseUrl
+    displayName: URL del ambiente a probar ("local" = desplegar la app en el agente)
+    type: string
+    default: local
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  ${{ if eq(parameters.baseUrl, 'local') }}:
+    BASE_URL: http://localhost:8000
+  ${{ else }}:
+    BASE_URL: ${{ parameters.baseUrl }}
+
+jobs:
+  - job: karate
+    displayName: API Tests (Karate)
+    timeoutInMinutes: 15
+    steps:
+      - task: JavaToolInstaller@0
+        inputs:
+          versionSpec: "21"
+          jdkArchitectureOption: x64
+          jdkSourceOption: PreInstalled
+      - ${{ if eq(parameters.baseUrl, 'local') }}:
+          - script: docker compose up -d --build --wait
+            displayName: Desplegar app + PostgreSQL
+      - script: mvn -B test -Dkarate.baseUrl="$BASE_URL"
+        workingDirectory: tests/karate
+        displayName: Pruebas de API (Karate)
+        env:
+          BASE_URL: $(BASE_URL)
+      - task: PublishTestResults@2
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFiles: tests/karate/target/karate-reports/*.xml
+          testRunTitle: API (Karate)
+      - publish: tests/karate/target/karate-reports
+        artifact: karate-report
+        condition: succeededOrFailed()
+      - ${{ if eq(parameters.baseUrl, 'local') }}:
+          - script: docker compose logs app
+            condition: failed()
+            displayName: Logs de la app
+          - script: docker compose down -v
+            condition: always()
+            displayName: Apagar entorno

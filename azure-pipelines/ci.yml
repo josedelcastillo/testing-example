@@ -1,4 +1,5 @@
-# Mismo flujo que .github/workflows/ci.yml, para Azure DevOps.
+# Pipeline de CI para Azure DevOps (equivalente a .github/workflows/ci.yml).
+# Karate y E2E tienen pipelines propios en esta misma carpeta.
 trigger:
   branches:
     include: [main]
@@ -85,37 +86,3 @@ stages:
           - script: docker compose down -v
             condition: always()
             displayName: Apagar PostgreSQL
-
-  - stage: E2ETests
-    dependsOn: IntegrationTests
-    jobs:
-      - job: playwright
-        steps:
-          - task: UsePythonVersion@0
-            inputs:
-              versionSpec: $(PYTHON_VERSION)
-          - script: |
-              pip install -r requirements-dev.txt
-              playwright install --with-deps chromium
-            displayName: Instalar dependencias y navegador
-          - script: docker compose up -d --build --wait
-            displayName: Desplegar app + PostgreSQL
-          - script: >
-              pytest tests/e2e -m e2e
-              --tracing retain-on-failure --screenshot only-on-failure
-              --output reports/e2e-artifacts --junitxml=reports/e2e.xml
-            displayName: Pruebas E2E (Playwright)
-          - script: docker compose logs app
-            condition: failed()
-            displayName: Logs de la app
-          - task: PublishTestResults@2
-            condition: succeededOrFailed()
-            inputs:
-              testResultsFiles: reports/e2e.xml
-              testRunTitle: E2E
-          - publish: reports/e2e-artifacts
-            artifact: e2e-traces
-            condition: failed()
-          - script: docker compose down -v
-            condition: always()
-            displayName: Apagar entorno

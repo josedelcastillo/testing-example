@@ -1,6 +1,6 @@
 # Laboratorio: automatización de pruebas
 
-Duración sugerida: 2 h 45 min. Trabajar en una rama propia y abrir un Pull
+Duración sugerida: 3 h 25 min. Trabajar en una rama propia y abrir un Pull
 Request para ver el pipeline en acción.
 
 ## Parte 1 — Leer y ejecutar (15 min)
@@ -63,13 +63,31 @@ envío está afecto a IGV.
    fallan aunque la BD tenga datos de la ejecución anterior? ¿Qué pasaría
    si las pruebas usaran un SKU fijo como `"CEL-01"`?
 
-## Parte 5 — Pipeline (30 min)
+## Parte 5 — API con Karate (30 min)
 
-1. Haz push y abre un PR. Observa las etapas en *Actions* (o Azure DevOps).
-2. Haz que la prueba unitaria falle a propósito y vuelve a hacer push.
-   ¿Se ejecutó la etapa de integración? ¿Por qué ese diseño ahorra tiempo
-   y dinero?
-3. Sube `--cov-fail-under` a 100 en integración. ¿Qué pasa? Discute si
+1. Con la app arriba (`make app-up`), corre `make test-api` y abre
+   `tests/karate/target/karate-reports/karate-summary.html`.
+2. En `pedidos.feature`, agrega una fila a la tabla `Examples` para un cliente
+   `FRECUENTE` que compra 5 x S/ 100.00. Calcula a mano el resultado esperado
+   antes de correrlo.
+3. Escribe un escenario nuevo: un pedido con dos productos distintos en
+   `items`. Verifica el subtotal y que se descuente el stock de ambos.
+4. Discute: ¿qué ventaja tiene que Karate no importe código de la app? ¿Qué
+   pierdes frente a la prueba de integración en `pytest`?
+
+## Parte 6 — Pipelines (40 min)
+
+1. Haz push y abre un PR. Observa en *Actions* (o Azure DevOps) que corren
+   **tres** pipelines: CI, API Tests (Karate) y E2E Tests.
+2. Haz que una prueba unitaria falle a propósito y vuelve a hacer push.
+   Dentro de CI, ¿se ejecutó la etapa de integración? ¿Y los pipelines de
+   Karate y E2E? Discute el trade-off de tenerlos separados.
+3. Cambia solo `README.md` y haz push. ¿Qué pipelines corrieron? ¿Por qué?
+4. Ejecuta manualmente *API Tests (Karate)* con *Run workflow*, dejando
+   `base_url` vacío. Luego piensa: si existiera un ambiente de staging, ¿qué
+   valor pondrías? ¿Por qué no tiene sentido hacer eso con las pruebas de
+   integración en `pytest`?
+5. Sube `--cov-fail-under` a 100 en integración. ¿Qué pasa? Discute si
    100 % de cobertura es una meta razonable.
-4. (Opcional) Configura *branch protection* para que `main` exija que el
-   jobs `integration-tests` y `e2e-tests` estén en verde antes del merge.
+6. (Opcional) Configura *branch protection* para que `main` exija en verde los
+   checks `integration-tests`, `karate` y `playwright` antes del merge.

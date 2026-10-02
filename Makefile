@@ -1,6 +1,6 @@
 PY ?= .venv/bin/python
 
-.PHONY: install lint format test-unit test-integration test-e2e test db-up db-down app-up down run
+.PHONY: install lint format test-unit test-integration test-e2e test-api test db-up db-down app-up down run
 
 install:
 	python3 -m venv .venv
@@ -40,7 +40,10 @@ test-e2e: app-up
 		--tracing retain-on-failure --screenshot only-on-failure \
 		--output reports/e2e-artifacts --junitxml=reports/e2e.xml
 
-test: lint test-unit test-integration test-e2e
+test-api: app-up
+	cd tests/karate && mvn -B test -Dkarate.baseUrl=http://localhost:8000
+
+test: lint test-unit test-integration test-api test-e2e
 
 run: db-up
 	$(PY) -m uvicorn app.main:app --reload

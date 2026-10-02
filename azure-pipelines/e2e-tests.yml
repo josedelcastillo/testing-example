@@ -1,0 +1,88 @@
+# Pruebas end-to-end con Playwright (equivalente a
+# .github/workflows/e2e-tests.yml). Pipeline independiente del CI.
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - app
+      - tests/e2e
+      - Dockerfile
+      - docker-compose.yml
+      - docker
+      - requirements.txt
+      - requirements-dev.txt
+      - azure-pipelines/e2e-tests.yml
+pr:
+  branches:
+    include: ["*"]
+  paths:
+    include:
+      - app
+      - tests/e2e
+      - Dockerfile
+      - docker-compose.yml
+      - docker
+      - requirements.txt
+      - requirements-dev.txt
+      - azure-pipelines/e2e-tests.yml
+
+schedules:
+  - cron: "0 6 * * *" # regresión diaria, 01:00 hora de Perú
+    displayName: Regresión diaria
+    branches:
+      include: [main]
+    always: true
+
+parameters:
+  - name: baseUrl
+    displayName: URL del ambiente a probar ("local" = desplegar la app en el agente)
+    type: string
+    default: local
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  ${{ if eq(parameters.baseUrl, 'local') }}:
+    E2E_BASE_URL: http://localhost:8000
+  ${{ else }}:
+    E2E_BASE_URL: ${{ parameters.baseUrl }}
+
+jobs:
+  - job: playwright
+    displayName: E2E Tests (Playwright)
+    timeoutInMinutes: 20
+    steps:
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: "3.12"
+      - script: |
+          pip install -r requirements-dev.txt
+          playwright install --with-deps chromium
+        displayName: Instalar dependencias y navegador
+      - ${{ if eq(parameters.baseUrl, 'local') }}:
+          - script: docker compose up -d --build --wait
+            displayName: Desplegar app + PostgreSQL
+      - script: >
+          pytest tests/e2e -m e2e
+          --tracing retain-on-failure --screenshot only-on-failure
+          --output reports/e2e-artifacts --junitxml=reports/e2e.xml
+        displayName: Pruebas E2E (Playwright)
+        env:
+          E2E_BASE_URL: $(E2E_BASE_URL)
+      - task: PublishTestResults@2
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFiles: reports/e2e.xml
+          testRunTitle: E2E
+      - publish: reports/e2e-artifacts
+        artifact: e2e-traces
+        condition: failed()
+      - ${{ if eq(parameters.baseUrl, 'local') }}:
+          - script: docker compose logs app
+            condition: failed()
+            displayName: Logs de la app
+          - script: docker compose down -v
+            condition: always()
+            displayName: Apagar entorno
