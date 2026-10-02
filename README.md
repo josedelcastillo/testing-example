@@ -144,19 +144,37 @@ pytest tests/integration
 - Integración usa la BD `tienda_test` y la app desplegada usa `tienda`, así
   ambos niveles pueden correr sobre el mismo PostgreSQL sin pisarse.
 
-**Pipeline (CI)**
-- `lint → unit (matriz 3.11/3.12/3.13) → integration → (api ∥ e2e)`: fail
-  fast, la etapa cara solo corre si la barata pasó. Karate y Playwright corren
-  en paralelo, cada una con su propio despliegue.
+**Pipelines: tres, independientes**
+
+| Pipeline | GitHub Actions | Azure DevOps | Qué valida | Cuándo corre |
+|---|---|---|---|---|
+| CI | [`ci.yml`](.github/workflows/ci.yml) | [`ci.yml`](azure-pipelines/ci.yml) | `lint → unit (3.11/3.12/3.13) → integración` | Todo PR y push a `main` |
+| API (Karate) | [`api-tests-karate.yml`](.github/workflows/api-tests-karate.yml) | [`api-tests-karate.yml`](azure-pipelines/api-tests-karate.yml) | Contrato de la API desplegada | PR/push que toquen `app/`, `tests/karate/` o el despliegue; manual; diario |
+| E2E (Playwright) | [`e2e-tests.yml`](.github/workflows/e2e-tests.yml) | [`e2e-tests.yml`](azure-pipelines/e2e-tests.yml) | Flujos de usuario en el navegador | PR/push que toquen `app/`, `tests/e2e/` o el despliegue; manual; diario |
+
+- **Por qué separarlos**: CI es rápido y corre siempre; es el feedback del
+  desarrollador. Karate y E2E necesitan un ambiente desplegado, son más
+  lentos y tienen otro ciclo de vida: también se corren contra QA o staging
+  sin recompilar nada, y como regresión nocturna.
+- **Ejecución manual contra otro ambiente**: en GitHub, *Actions → API Tests
+  (Karate) / E2E Tests → Run workflow* e indicar `base_url`. En Azure
+  DevOps, *Run pipeline* y cambiar el parámetro `baseUrl` (valor `local` =
+  desplegar en el agente). Si se indica una URL, no se despliega nada.
+- **Filtros de rutas**: un cambio solo en `docs/` no dispara Karate ni E2E;
+  ahorra minutos de runner.
+- **Trade-off aceptado**: los tres corren en paralelo en un PR, así que Karate
+  y E2E pueden ejecutarse aunque CI falle. Encadenarlos (`workflow_run` en
+  GitHub, `resources.pipelines` en Azure) ahorra minutos, pero el resultado ya
+  no aparece como check del PR.
 - **Quality gates**: el build falla si la cobertura baja de 90 % (dominio) u
   80 % (integración).
-- Reportes **JUnit XML** y **Cobertura XML** publicados como artefactos
-  (GitHub) o en la pestaña *Tests / Code Coverage* (Azure DevOps).
-- PostgreSQL como *service container* (GitHub) o vía `docker compose`
-  (Azure DevOps): mismo `docker-compose.yml` local y en CI.
+- Reportes **JUnit XML**, **Cobertura XML**, HTML de Karate y traces de
+  Playwright como artefactos (GitHub) o en *Tests / Code Coverage* (Azure).
+- Mismo `docker-compose.yml` para desplegar en local, en GitHub y en Azure.
 
-Archivos: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ·
-[`azure-pipelines.yml`](azure-pipelines.yml)
+> En Azure DevOps cada archivo de `azure-pipelines/` se registra como un
+> pipeline distinto: *Pipelines → New pipeline → Existing Azure Pipelines
+> YAML file*.
 
 ## 5. Laboratorio
 
