@@ -97,7 +97,36 @@ jobs:
           name: integration-report
           path: reports/
 
-  # Etapa 3: la app desplegada como contenedor, probada desde el navegador.
+  # Etapa 3a: pruebas de API de caja negra (Karate) contra la app desplegada.
+  api-tests:
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: tests/karate/pom.xml
+      - name: Desplegar app + PostgreSQL
+        run: docker compose up -d --build --wait
+      - name: Pruebas de API (Karate)
+        working-directory: tests/karate
+        run: mvn -B test -Dkarate.baseUrl=http://localhost:8000
+      - name: Logs de la app (si falló)
+        if: failure()
+        run: docker compose logs app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: karate-report
+          path: tests/karate/target/karate-reports/
+      - if: always()
+        run: docker compose down -v
+
+  # Etapa 3b: la app desplegada como contenedor, probada desde el navegador.
+  # Corre en paralelo con api-tests.
   e2e-tests:
     needs: integration-tests
     runs-on: ubuntu-latest

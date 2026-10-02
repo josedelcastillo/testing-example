@@ -1,15 +1,16 @@
-# Automatización de pruebas en DevOps: unitarias, integración y E2E
+# Automatización de pruebas en DevOps: unitarias, integración, API y E2E
 
 Proyecto de ejemplo para el curso de DevOps. Es una tienda de pedidos en
 Python/FastAPI + PostgreSQL con una UI web mínima. Muestra cómo diseñar,
-ejecutar y automatizar **pruebas unitarias**, **de integración** y
-**end-to-end (E2E)** en un pipeline CI (GitHub Actions y Azure DevOps).
+ejecutar y automatizar **pruebas unitarias**, **de integración**,
+**de API con Karate** y **end-to-end (E2E)** en un pipeline CI (GitHub Actions y Azure DevOps).
 
 ## 1. La pirámide de pruebas aplicada
 
 ```
-             ▲   E2E (UI)         4 pruebas  · ~3 s + despliegue · navegador real
-           ▲▲▲▲  Integración     15 pruebas · ~1 s · PostgreSQL real
+              ▲    E2E (UI)        4 pruebas  · Playwright · navegador real
+            ▲▲▲▲   API (Karate)   18 escenarios · caja negra · app desplegada
+          ▲▲▲▲▲▲   Integración    15 pruebas · ~1 s · PostgreSQL real
         ▲▲▲▲▲▲▲▲ Unitarias       24 pruebas · <1 s · sin red ni BD
 ```
 
@@ -44,6 +45,7 @@ flowchart LR
 | `services.py` — registrar pedido, cobrar, rollback | Unitaria con mocks | `tests/unit/test_order_service.py` |
 | `repository.py` — SQL, constraints, NUMERIC | Integración con BD real | `tests/integration/test_repository.py` |
 | `main.py` — endpoints, códigos HTTP, validación | Integración del servicio vía HTTP | `tests/integration/test_api.py` |
+| API desplegada — contrato, esquema, reglas de negocio por HTTP | API con Karate (BDD) | `tests/karate/src/test/java/tienda/*.feature` |
 | UI + contenedor + BD — crear producto, comprar, errores | E2E con Playwright | `tests/e2e/test_compra.py` |
 
 ## 3. Ejecutar localmente
@@ -55,6 +57,7 @@ make install            # crea .venv, instala dependencias y Chromium
 make lint               # ruff: estilo y errores estáticos
 make test-unit          # unitarias + gate de cobertura >= 90 %
 make test-integration   # levanta PostgreSQL (docker compose) + integración
+make test-api           # despliegue + pruebas de API con Karate (requiere Java 17+ y Maven)
 make test-e2e           # build + despliegue de la app (docker compose) + Playwright
 make test               # todo lo anterior, igual que el pipeline
 make app-up             # app desplegada en http://localhost:8000 (UI) y /docs (API)
@@ -102,6 +105,28 @@ pytest tests/integration
 - Si la BD no está disponible, la prueba **falla** con un mensaje claro;
   nunca se omite en silencio (un `skip` silencioso en CI es un falso verde).
 
+**API con Karate** (`tests/karate`)
+- ¿Por qué no está en "integración"? Las pruebas de integración en `pytest`
+  importan la app y controlan la BD (rollback). Karate es **caja negra**: solo
+  conoce la URL. Prueba el **contrato** de la API desplegada, la misma que
+  consumiría un frontend, una app móvil u otro microservicio.
+- Sintaxis Gherkin (`Given / When / Then`) legible por QA y negocio, sin
+  escribir Java: el único `.java` es el runner de JUnit.
+- `match` con marcadores *fuzzy* (`#number`, `#regex`, `#string`) para validar
+  **esquemas** sin acoplarse a valores variables como `id` o `payment_id`.
+- `Scenario Outline` + `Examples`: la tabla de reglas de precio (descuentos,
+  IGV) es la misma tabla que negocio entiende.
+- `call read('common/crear-producto.feature')`: pasos reutilizables.
+- Ejecución en paralelo (`Runner.parallel(4)`) y reporte HTML en
+  `tests/karate/target/karate-reports/karate-summary.html`.
+- Otra URL (staging, por ejemplo): `mvn test -Dkarate.baseUrl=https://staging.midominio.pe`.
+
+| Usa `pytest` (integración) si… | Usa Karate si… |
+|---|---|
+| El equipo es del mismo lenguaje que la app | QA o varios equipos prueban la API sin tocar su código |
+| Necesitas aislar la BD o simular dependencias | Quieres probar el contrato de un servicio ya desplegado |
+| Buscas el feedback más rápido | Buscas reutilizar la suite contra varios ambientes (dev, QA, staging) |
+
 **E2E**
 - La app se construye con el `Dockerfile` y se despliega con `docker compose`:
   se prueba **el mismo artefacto** que iría a producción.
@@ -120,8 +145,9 @@ pytest tests/integration
   ambos niveles pueden correr sobre el mismo PostgreSQL sin pisarse.
 
 **Pipeline (CI)**
-- `lint → unit (matriz 3.11/3.12/3.13) → integration → e2e`: fail fast, la
-  etapa cara solo corre si la barata pasó.
+- `lint → unit (matriz 3.11/3.12/3.13) → integration → (api ∥ e2e)`: fail
+  fast, la etapa cara solo corre si la barata pasó. Karate y Playwright corren
+  en paralelo, cada una con su propio despliegue.
 - **Quality gates**: el build falla si la cobertura baja de 90 % (dominio) u
   80 % (integración).
 - Reportes **JUnit XML** y **Cobertura XML** publicados como artefactos

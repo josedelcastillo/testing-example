@@ -86,6 +86,38 @@ stages:
             condition: always()
             displayName: Apagar PostgreSQL
 
+  - stage: ApiTests
+    displayName: API Tests (Karate)
+    dependsOn: IntegrationTests
+    jobs:
+      - job: karate
+        steps:
+          - task: JavaToolInstaller@0
+            inputs:
+              versionSpec: "21"
+              jdkArchitectureOption: x64
+              jdkSourceOption: PreInstalled
+          - script: docker compose up -d --build --wait
+            displayName: Desplegar app + PostgreSQL
+          - script: mvn -B test -Dkarate.baseUrl=http://localhost:8000
+            workingDirectory: tests/karate
+            displayName: Pruebas de API (Karate)
+          - script: docker compose logs app
+            condition: failed()
+            displayName: Logs de la app
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: tests/karate/target/karate-reports/*.xml
+              testRunTitle: API (Karate)
+          - publish: tests/karate/target/karate-reports
+            artifact: karate-report
+            condition: succeededOrFailed()
+          - script: docker compose down -v
+            condition: always()
+            displayName: Apagar entorno
+
+  # Corre en paralelo con ApiTests: ambas dependen solo de IntegrationTests.
   - stage: E2ETests
     dependsOn: IntegrationTests
     jobs:
