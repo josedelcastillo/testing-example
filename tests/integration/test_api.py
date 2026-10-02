@@ -83,3 +83,13 @@ def test_tipo_de_cliente_invalido_devuelve_422(client, producto):
     )
 
     assert response.status_code == 422
+
+
+def test_listar_productos_ordenados_por_sku(client, producto):
+    client.post(
+        "/products", json={"sku": "AUD-01", "name": "Audífonos", "price": "99.00", "stock": 2}
+    )
+
+    skus = [p["sku"] for p in client.get("/products").json()]
+
+    assert skus == ["AUD-01", "CEL-01"]

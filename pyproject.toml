@@ -8,6 +8,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "integration: requiere servicios externos reales (PostgreSQL)",
+    "e2e: requiere la aplicación desplegada y un navegador",
 ]
 
 [tool.coverage.run]

@@ -1,30 +1,35 @@
-# Automatización de pruebas en DevOps: unitarias e integración
+# Automatización de pruebas en DevOps: unitarias, integración y E2E
 
-Proyecto de ejemplo para el curso de DevOps. Es una API de pedidos ("Tienda")
-en Python/FastAPI + PostgreSQL. Muestra cómo diseñar, ejecutar y automatizar
-**pruebas unitarias** y **pruebas de integración** en un pipeline CI
-(GitHub Actions y Azure DevOps).
+Proyecto de ejemplo para el curso de DevOps. Es una tienda de pedidos en
+Python/FastAPI + PostgreSQL con una UI web mínima. Muestra cómo diseñar,
+ejecutar y automatizar **pruebas unitarias**, **de integración** y
+**end-to-end (E2E)** en un pipeline CI (GitHub Actions y Azure DevOps).
 
 ## 1. La pirámide de pruebas aplicada
 
 ```
-            ▲  E2E / UI           (pocas, lentas, frágiles)  → fuera de alcance
-           ▲▲▲ Integración        14 pruebas · ~1 s · PostgreSQL real
-        ▲▲▲▲▲▲▲ Unitarias         24 pruebas · <1 s · sin red ni BD
+             ▲   E2E (UI)         4 pruebas  · ~3 s + despliegue · navegador real
+           ▲▲▲▲  Integración     15 pruebas · ~1 s · PostgreSQL real
+        ▲▲▲▲▲▲▲▲ Unitarias       24 pruebas · <1 s · sin red ni BD
 ```
 
-| | Unitarias (`tests/unit`) | Integración (`tests/integration`) |
-|---|---|---|
-| Qué prueban | Reglas de negocio y orquestación aisladas | Que las piezas funcionan **juntas**: HTTP → servicio → ORM → PostgreSQL |
-| Dependencias | Reemplazadas por `Mock` | Reales (solo el pago externo es simulado) |
-| Velocidad | Milisegundos | Segundos |
-| Si fallan, el error está en… | La función bajo prueba | La interacción: SQL, mapeo, constraints, config, contrato HTTP |
-| En el pipeline | Primero, en cada commit (fail fast) | Después, solo si las unitarias pasan |
+| | Unitarias (`tests/unit`) | Integración (`tests/integration`) | E2E (`tests/e2e`) |
+|---|---|---|---|
+| Qué prueban | Reglas de negocio y orquestación aisladas | Que las piezas funcionan **juntas**: HTTP → servicio → ORM → PostgreSQL | **Flujos de usuario** en el navegador contra la app **desplegada** |
+| Cómo ven la app | Importan funciones | Importan la app (`TestClient`) | Caja negra: solo una URL |
+| Dependencias | Reemplazadas por `Mock` | Reales (solo el pago es simulado) | Todo real: contenedor, red, BD, navegador |
+| Datos | En memoria | Transacción con rollback por prueba | BD compartida: cada prueba crea datos únicos |
+| Velocidad | Milisegundos | Segundos | Segundos + build y despliegue |
+| Si fallan, el error está en… | La función bajo prueba | SQL, mapeo, constraints, contrato HTTP | UI, JavaScript, empaquetado (Dockerfile), configuración, red |
+| En el pipeline | Primero (fail fast) | Si pasan las unitarias | Al final, si pasa integración |
 
 ## 2. Arquitectura del ejemplo
 
+![UI de la tienda](docs/ui-e2e.png)
+
 ```mermaid
 flowchart LR
+    U[Navegador<br/>app/static/index.html] --> API
     C[Cliente HTTP] --> API[app/main.py<br/>FastAPI]
     API --> S[app/services.py<br/>OrderService]
     S --> P[app/pricing.py<br/>reglas puras: descuentos, IGV]
@@ -38,21 +43,30 @@ flowchart LR
 | `pricing.py` — subtotal, descuentos, IGV 18 % | Unitaria (parametrizada, valores límite) | `tests/unit/test_pricing.py` |
 | `services.py` — registrar pedido, cobrar, rollback | Unitaria con mocks | `tests/unit/test_order_service.py` |
 | `repository.py` — SQL, constraints, NUMERIC | Integración con BD real | `tests/integration/test_repository.py` |
-| `main.py` — endpoints, códigos HTTP, validación | Integración end-to-end del servicio | `tests/integration/test_api.py` |
+| `main.py` — endpoints, códigos HTTP, validación | Integración del servicio vía HTTP | `tests/integration/test_api.py` |
+| UI + contenedor + BD — crear producto, comprar, errores | E2E con Playwright | `tests/e2e/test_compra.py` |
 
 ## 3. Ejecutar localmente
 
 Requisitos: Python 3.11+, Docker.
 
 ```bash
-make install            # crea .venv e instala dependencias
+make install            # crea .venv, instala dependencias y Chromium
 make lint               # ruff: estilo y errores estáticos
 make test-unit          # unitarias + gate de cobertura >= 90 %
 make test-integration   # levanta PostgreSQL (docker compose) + integración
+make test-e2e           # build + despliegue de la app (docker compose) + Playwright
 make test               # todo lo anterior, igual que el pipeline
-make run                # API en http://localhost:8000/docs
-make db-down            # apaga y borra la BD
+make app-up             # app desplegada en http://localhost:8000 (UI) y /docs (API)
+make down               # apaga todo y borra la BD
 ```
+
+Para ver el navegador mientras corren las E2E: `pytest tests/e2e --headed --slowmo 500`.
+Si una E2E falla, abre el trace con
+`playwright show-trace reports/e2e-artifacts/<prueba>/trace.zip`.
+
+> Si ya tenías el volumen de PostgreSQL de una versión anterior, corre
+> `make down` una vez para que se cree la BD `tienda_test`.
 
 Sin `make`:
 
@@ -88,9 +102,26 @@ pytest tests/integration
 - Si la BD no está disponible, la prueba **falla** con un mensaje claro;
   nunca se omite en silencio (un `skip` silencioso en CI es un falso verde).
 
+**E2E**
+- La app se construye con el `Dockerfile` y se despliega con `docker compose`:
+  se prueba **el mismo artefacto** que iría a producción.
+- Caja negra: las pruebas no importan nada de `app/`, solo conocen la URL
+  (`E2E_BASE_URL`, por defecto `http://localhost:8000`).
+- Selectores por rol, etiqueta o `data-testid` (`get_by_role`,
+  `get_by_label`), acotados a su sección para evitar ambigüedad
+  (*strict mode* de Playwright).
+- `expect(...)` espera automáticamente: nunca `sleep`.
+- Datos preparados por API (rápido) y acción por UI (lo que se prueba).
+- La BD **no** se limpia entre pruebas, como en staging: cada prueba usa
+  SKUs únicos para ser independiente.
+- Evidencia en fallos: trace de Playwright, captura de pantalla y logs del
+  contenedor como artefactos del pipeline.
+- Integración usa la BD `tienda_test` y la app desplegada usa `tienda`, así
+  ambos niveles pueden correr sobre el mismo PostgreSQL sin pisarse.
+
 **Pipeline (CI)**
-- `lint → unit (matriz 3.11/3.12/3.13) → integration`: fail fast, la etapa
-  cara solo corre si la barata pasó.
+- `lint → unit (matriz 3.11/3.12/3.13) → integration → e2e`: fail fast, la
+  etapa cara solo corre si la barata pasó.
 - **Quality gates**: el build falla si la cobertura baja de 90 % (dominio) u
   80 % (integración).
 - Reportes **JUnit XML** y **Cobertura XML** publicados como artefactos

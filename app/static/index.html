@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tienda DevOps</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1f2933; }
+    h1 { margin-bottom: .25rem; }
+    section { border: 1px solid #d9e2ec; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+    form { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; }
+    label { display: flex; flex-direction: column; font-size: .85rem; gap: .25rem; }
+    input, select, button { padding: .45rem .6rem; font-size: 1rem; }
+    button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: .4rem; border-bottom: 1px solid #e4e7eb; }
+    td.num, th.num { text-align: right; }
+    [role="alert"] { background: #fde8e8; color: #9b1c1c; padding: .6rem .8rem; border-radius: 6px; }
+    [role="status"] { background: #e3f9e5; color: #05400a; padding: .6rem .8rem; border-radius: 6px; }
+    dl { display: grid; grid-template-columns: max-content max-content; gap: .25rem 1rem; }
+    dt { font-weight: 600; }
+    dd { margin: 0; text-align: right; }
+  </style>
+</head>
+<body>
+  <h1>Tienda DevOps</h1>
+  <p>Aplicación de ejemplo para pruebas end-to-end.</p>
+
+  <section aria-labelledby="t-nuevo">
+    <h2 id="t-nuevo">Nuevo producto</h2>
+    <form id="product-form">
+      <label>SKU <input name="sku" required maxlength="32"></label>
+      <label>Nombre <input name="name" required maxlength="120"></label>
+      <label>Precio (S/) <input name="price" type="number" step="0.01" min="0" required></label>
+      <label>Stock <input name="stock" type="number" min="0" required></label>
+      <button type="submit">Crear producto</button>
+    </form>
+  </section>
+
+  <section aria-labelledby="t-catalogo">
+    <h2 id="t-catalogo">Catálogo</h2>
+    <table>
+      <thead><tr><th>SKU</th><th>Nombre</th><th class="num">Precio</th><th class="num">Stock</th></tr></thead>
+      <tbody id="catalog"></tbody>
+    </table>
+  </section>
+
+  <section aria-labelledby="t-pedido">
+    <h2 id="t-pedido">Registrar pedido</h2>
+    <form id="order-form">
+      <label>Producto <select name="sku" required></select></label>
+      <label>Cantidad <input name="quantity" type="number" min="1" value="1" required></label>
+      <label>Tipo de cliente
+        <select name="customer_type">
+          <option>REGULAR</option><option>FRECUENTE</option><option>VIP</option>
+        </select>
+      </label>
+      <button type="submit">Comprar</button>
+    </form>
+  </section>
+
+  <div id="message" aria-live="polite"></div>
+
+  <section id="receipt" aria-labelledby="t-recibo" hidden>
+    <h2 id="t-recibo">Comprobante</h2>
+    <dl>
+      <dt>Pedido</dt><dd data-testid="order-id"></dd>
+      <dt>Subtotal</dt><dd data-testid="subtotal"></dd>
+      <dt>Descuento</dt><dd data-testid="discount"></dd>
+      <dt>IGV (18 %)</dt><dd data-testid="igv"></dd>
+      <dt>Total</dt><dd data-testid="total"></dd>
+    </dl>
+  </section>
+
+  <script>
+    const $ = (sel) => document.querySelector(sel);
+
+    function showMessage(text, isError) {
+      const box = document.createElement("div");
+      box.setAttribute("role", isError ? "alert" : "status");
+      box.textContent = text;
+      $("#message").replaceChildren(box);
+    }
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        headers: { "Content-Type": "application/json" }, ...options,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = Array.isArray(body.detail) ? "Datos inválidos" : body.detail;
+        throw new Error(detail || `Error ${res.status}`);
+      }
+      return body;
+    }
+
+    async function loadCatalog() {
+      const products = await api("/products");
+      $("#catalog").replaceChildren(...products.map((p) => {
+        const tr = document.createElement("tr");
+        tr.dataset.sku = p.sku;
+        for (const [value, cls] of [[p.sku], [p.name], [`S/ ${p.price}`, "num"], [p.stock, "num"]]) {
+          const td = document.createElement("td");
+          td.textContent = value;
+          if (cls) td.className = cls;
+          tr.append(td);
+        }
+        return tr;
+      }));
+      const select = $("#order-form select[name=sku]");
+      const current = select.value;
+      select.replaceChildren(...products.map((p) => new Option(`${p.sku} - ${p.name}`, p.sku)));
+      if (current) select.value = current;
+    }
+
+    $("#product-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const data = Object.fromEntries(new FormData(ev.target));
+      try {
+        await api("/products", {
+          method: "POST",
+          body: JSON.stringify({ ...data, stock: Number(data.stock) }),
+        });
+        ev.target.reset();
+        showMessage(`Producto ${data.sku} creado`, false);
+        await loadCatalog();
+      } catch (err) {
+        showMessage(err.message, true);
+      }
+    });
+
+    $("#order-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const data = Object.fromEntries(new FormData(ev.target));
+      $("#receipt").hidden = true;
+      try {
+        const order = await api("/orders", {
+          method: "POST",
+          body: JSON.stringify({
+            customer_type: data.customer_type,
+            items: [{ sku: data.sku, quantity: Number(data.quantity) }],
+          }),
+        });
+        $("[data-testid=order-id]").textContent = `#${order.id}`;
+        for (const k of ["subtotal", "discount", "igv", "total"]) {
+          $(`[data-testid=${k}]`).textContent = `S/ ${order[k]}`;
+        }
+        $("#receipt").hidden = false;
+        showMessage("Pedido registrado", false);
+      } catch (err) {
+        showMessage(err.message, true);
+      }
+      await loadCatalog();
+    });
+
+    loadCatalog().catch((err) => showMessage(err.message, true));
+  </script>
+</body>
+</html>

@@ -1,14 +1,18 @@
+import os
 from contextlib import asynccontextmanager
 from decimal import Decimal
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_engine, get_session
-from app.models import Base
+from app.models import Base, Product
 from app.payments import FakePaymentGateway, PaymentDeclinedError, PaymentGateway
 from app.repository import SqlRepository
 from app.services import InsufficientStockError, OrderService, ProductNotFoundError
@@ -21,7 +25,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Tienda DevOps - ejemplo de pruebas", lifespan=lifespan)
-_gateway = FakePaymentGateway()
+_gateway = FakePaymentGateway(limit=Decimal(os.getenv("PAYMENT_LIMIT", "10000.00")))
 
 
 def get_payment_gateway() -> PaymentGateway:
@@ -79,6 +83,12 @@ def create_product(data: ProductIn, session: SessionDep):
     return ProductOut.model_validate(product, from_attributes=True)
 
 
+@app.get("/products", response_model=list[ProductOut])
+def list_products(session: SessionDep):
+    products = session.scalars(select(Product).order_by(Product.sku))
+    return [ProductOut.model_validate(p, from_attributes=True) for p in products]
+
+
 @app.get("/products/{sku}", response_model=ProductOut)
 def get_product(sku: str, session: SessionDep):
     product = SqlRepository(session).get_product(sku)
@@ -103,3 +113,8 @@ def create_order(data: OrderIn, session: SessionDep, gateway: GatewayDep):
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     return OrderOut.model_validate(order, from_attributes=True)
+
+
+# UI mínima (HTML + JS) para las pruebas E2E. Se monta al final para que las
+# rutas de la API tengan prioridad.
+app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="ui")

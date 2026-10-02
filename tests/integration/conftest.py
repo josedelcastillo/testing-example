@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.db import DEFAULT_URL, get_session
+from app.db import get_session
 from app.main import app, get_payment_gateway
 from app.models import Base
 from app.payments import FakePaymentGateway
@@ -25,7 +25,9 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture(scope="session")
 def engine():
-    url = os.getenv("DATABASE_URL", DEFAULT_URL)
+    url = os.getenv(
+        "TEST_DATABASE_URL", "postgresql+psycopg://tienda:tienda@localhost:5432/tienda_test"
+    )
     engine = create_engine(url)
     try:
         with engine.connect() as conn:

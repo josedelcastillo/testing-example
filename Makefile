@@ -1,10 +1,11 @@
 PY ?= .venv/bin/python
 
-.PHONY: install lint format test-unit test-integration test db-up db-down run
+.PHONY: install lint format test-unit test-integration test-e2e test db-up db-down app-up down run
 
 install:
 	python3 -m venv .venv
 	$(PY) -m pip install -r requirements-dev.txt
+	$(PY) -m playwright install chromium
 
 lint:
 	$(PY) -m ruff check .
@@ -22,7 +23,10 @@ test-unit:
 db-up:
 	docker compose up -d --wait db
 
-db-down:
+app-up:
+	docker compose up -d --build --wait
+
+down:
 	docker compose down -v
 
 test-integration: db-up
@@ -31,7 +35,14 @@ test-integration: db-up
 		--cov-report=term-missing --cov-report=xml:reports/coverage.xml \
 		--junitxml=reports/integration.xml
 
-test: lint test-unit test-integration
+test-e2e: app-up
+	$(PY) -m pytest tests/e2e -m e2e \
+		--tracing retain-on-failure --screenshot only-on-failure \
+		--output reports/e2e-artifacts --junitxml=reports/e2e.xml
+
+test: lint test-unit test-integration test-e2e
 
 run: db-up
 	$(PY) -m uvicorn app.main:app --reload
+
+db-down: down
