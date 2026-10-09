@@ -9,6 +9,8 @@ addopts = "-ra --strict-markers"
 markers = [
     "integration: requiere servicios externos reales (PostgreSQL)",
     "e2e: requiere la aplicación desplegada y un navegador",
+    "catalogo: feature Catálogo (alta y consulta de productos)",
+    "compra: feature Compra (pedidos, descuentos, errores de pago y stock)",
 ]
 
 [tool.coverage.run]

@@ -8,7 +8,7 @@ ejecutar y automatizar **pruebas unitarias**, **de integración**,
 ## 1. La pirámide de pruebas aplicada
 
 ```
-              ▲    E2E (UI)        4 pruebas  · Playwright · navegador real
+              ▲    E2E (UI)       13 pruebas  · Playwright · navegador real
             ▲▲▲▲   API (Karate)   18 escenarios · caja negra · app desplegada
           ▲▲▲▲▲▲   Integración    15 pruebas · ~1 s · PostgreSQL real
         ▲▲▲▲▲▲▲▲ Unitarias       24 pruebas · <1 s · sin red ni BD
@@ -46,7 +46,7 @@ flowchart LR
 | `repository.py` — SQL, constraints, NUMERIC | Integración con BD real | `tests/integration/test_repository.py` |
 | `main.py` — endpoints, códigos HTTP, validación | Integración del servicio vía HTTP | `tests/integration/test_api.py` |
 | API desplegada — contrato, esquema, reglas de negocio por HTTP | API con Karate (BDD) | `tests/karate/src/test/java/tienda/*.feature` |
-| UI + contenedor + BD — crear producto, comprar, errores | E2E con Playwright | `tests/e2e/test_compra.py` |
+| UI + contenedor + BD — catálogo (alta, consulta) y compra (descuentos, errores) | E2E con Playwright, agrupadas por feature | `tests/e2e/catalogo/`, `tests/e2e/compra/` |
 
 ## 3. Ejecutar localmente
 
@@ -139,6 +139,35 @@ pytest tests/integration
 - Datos preparados por API (rápido) y acción por UI (lo que se prueba).
 - La BD **no** se limpia entre pruebas, como en staging: cada prueba usa
   SKUs únicos para ser independiente.
+- **Agrupación por feature**: una carpeta por feature (`catalogo/`, `compra/`),
+  un archivo por capacidad (`test_alta_producto.py`, `test_descuentos.py`) y
+  clases para agrupar escenarios (`TestCompraExitosa`, `TestCompraRechazada`).
+  Cada módulo lleva el marker de su feature, así se puede correr solo uno:
+
+  ```bash
+  pytest tests/e2e -m catalogo            # por marker
+  pytest tests/e2e/compra                 # por carpeta
+  pytest tests/e2e -k "TestCompraRechazada"  # por clase
+  make test-e2e FEATURE=compra            # despliega y corre un feature
+  ```
+
+  En el pipeline E2E también se elige el feature al ejecutarlo a mano:
+  *Actions → E2E Tests → Run workflow → feature* (GitHub) o el parámetro
+  `feature` en *Run pipeline* (Azure DevOps). Valores: `todos`, `catalogo`,
+  `compra`. En PR, push y la corrida diaria se prueban todos.
+- **Scope de fixtures**: cuánto vive un dato y con quién se comparte.
+
+  | Scope | Fixture | Se crea… | Úsalo cuando… |
+  |---|---|---|---|
+  | `session` | `base_url`, `api`, `browser` (`conftest.py`) | 1 vez por ejecución | Es caro y no tiene estado: conexión, navegador |
+  | `package` | — | 1 vez por carpeta | Datos comunes a todo un feature |
+  | `module` | `producto` (`catalogo/test_consulta_catalogo.py`) | 1 vez por archivo | Las pruebas solo **leen** el dato |
+  | `class` | `producto` (`compra/test_descuentos.py`) | 1 vez por clase | Comparten el dato pero no verifican lo que cambian (stock) |
+  | `function` | `create_product`, `page` | En cada prueba | La prueba modifica el estado y lo verifica |
+
+  Para verlo en vivo: `pytest tests/e2e --setup-show` marca cada fixture con
+  `S`, `P`, `M`, `C` o `F` al crearla y destruirla. Regla: el scope más
+  amplio que no haga a las pruebas dependientes del orden.
 - Evidencia en fallos: trace de Playwright, captura de pantalla y logs del
   contenedor como artefactos del pipeline.
 - Integración usa la BD `tienda_test` y la app desplegada usa `tienda`, así

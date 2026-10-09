@@ -39,6 +39,11 @@ parameters:
     displayName: URL del ambiente a probar ("local" = desplegar la app en el agente)
     type: string
     default: local
+  - name: feature
+    displayName: Feature a probar (marker de pytest)
+    type: string
+    default: todos
+    values: [todos, catalogo, compra]
 
 pool:
   vmImage: ubuntu-latest
@@ -48,6 +53,10 @@ variables:
     E2E_BASE_URL: http://localhost:8000
   ${{ else }}:
     E2E_BASE_URL: ${{ parameters.baseUrl }}
+  ${{ if eq(parameters.feature, 'todos') }}:
+    E2E_MARKER: e2e
+  ${{ else }}:
+    E2E_MARKER: e2e and ${{ parameters.feature }}
 
 jobs:
   - job: playwright
@@ -65,10 +74,10 @@ jobs:
           - script: docker compose up -d --build --wait
             displayName: Desplegar app + PostgreSQL
       - script: >
-          pytest tests/e2e -m e2e
+          pytest tests/e2e -m "$(E2E_MARKER)"
           --tracing retain-on-failure --screenshot only-on-failure
           --output reports/e2e-artifacts --junitxml=reports/e2e.xml
-        displayName: Pruebas E2E (Playwright)
+        displayName: Pruebas E2E (Playwright) — ${{ parameters.feature }}
         env:
           E2E_BASE_URL: $(E2E_BASE_URL)
       - task: PublishTestResults@2
