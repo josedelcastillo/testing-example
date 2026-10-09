@@ -29,6 +29,11 @@ on:
         description: "URL del ambiente a probar (vacío = desplegar la app en el runner)"
         required: false
         default: ""
+      feature:
+        description: "Feature a probar (marker de pytest)"
+        type: choice
+        options: [todos, catalogo, compra]
+        default: todos
   schedule:
     - cron: "0 6 * * *" # regresión diaria, 01:00 hora de Perú
 
@@ -40,6 +45,8 @@ env:
   # Se pasa por variable de entorno, nunca interpolado en el script (evita inyección).
   E2E_BASE_URL: ${{ inputs.base_url || 'http://localhost:8000' }}
   DEPLOY_LOCAL: ${{ inputs.base_url == '' || inputs.base_url == null }}
+  # En push, PR y schedule no hay inputs: se corren todos los features.
+  E2E_MARKER: ${{ inputs.feature && inputs.feature != 'todos' && format('e2e and {0}', inputs.feature) || 'e2e' }}
 
 jobs:
   playwright:
@@ -57,9 +64,9 @@ jobs:
       - name: Desplegar app + PostgreSQL
         if: env.DEPLOY_LOCAL == 'true'
         run: docker compose up -d --build --wait
-      - name: Pruebas E2E (Playwright)
+      - name: Pruebas E2E (Playwright) — ${{ inputs.feature || 'todos' }}
         run: >
-          pytest tests/e2e -m e2e
+          pytest tests/e2e -m "$E2E_MARKER"
           --tracing retain-on-failure --screenshot only-on-failure
           --output reports/e2e-artifacts --junitxml=reports/e2e.xml
       - name: Logs de la app (si falló)

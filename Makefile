@@ -1,4 +1,7 @@
 PY ?= .venv/bin/python
+# Feature E2E a probar: todos | catalogo | compra  (ej.: make test-e2e FEATURE=compra)
+FEATURE ?= todos
+E2E_MARKER = $(if $(filter todos,$(FEATURE)),e2e,e2e and $(FEATURE))
 
 .PHONY: install lint format test-unit test-integration test-e2e test-api test db-up db-down app-up down run
 
@@ -36,7 +39,7 @@ test-integration: db-up
 		--junitxml=reports/integration.xml
 
 test-e2e: app-up
-	$(PY) -m pytest tests/e2e -m e2e \
+	$(PY) -m pytest tests/e2e -m "$(E2E_MARKER)" \
 		--tracing retain-on-failure --screenshot only-on-failure \
 		--output reports/e2e-artifacts --junitxml=reports/e2e.xml
 

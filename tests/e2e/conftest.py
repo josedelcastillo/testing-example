@@ -45,14 +45,23 @@ def api(playwright: Playwright, base_url):
     context.dispose()
 
 
+def crear_producto(api, price="100.00", stock=10, name="Producto E2E"):
+    """Crea un producto por API. Función normal (no fixture) para poder usarla
+    desde fixtures de cualquier scope: function, class, module o session."""
+    sku = f"E2E-{uuid.uuid4().hex[:8].upper()}"
+    response = api.post(
+        "/products", data={"sku": sku, "name": name, "price": price, "stock": stock}
+    )
+    assert response.status == 201, response.text()
+    return response.json()
+
+
 @pytest.fixture
 def create_product(api):
-    def _create(price="100.00", stock=10, name="Producto E2E"):
-        sku = f"E2E-{uuid.uuid4().hex[:8].upper()}"
-        response = api.post(
-            "/products", data={"sku": sku, "name": name, "price": price, "stock": stock}
-        )
-        assert response.status == 201, response.text()
-        return response.json()
+    """Scope function (el default): datos nuevos por prueba. Úsalo cuando la
+    prueba modifica el estado (p. ej. descuenta stock) y luego lo verifica."""
+
+    def _create(**kwargs):
+        return crear_producto(api, **kwargs)
 
     return _create
