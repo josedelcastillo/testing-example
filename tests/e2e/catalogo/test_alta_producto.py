@@ -23,7 +23,7 @@ def test_crear_producto_desde_la_ui(page: Page):
     sku = f"UI-{uuid.uuid4().hex[:8].upper()}"
     page.goto("/")
 
-    llenar_formulario(page, sku, "Monitor 27", "1299.90", 4)
+    llenar_formulario(page, sku, "Monitor 21", "1299.90", 1)
 
     expect(page.get_by_role("status")).to_have_text(f"Producto {sku} creado")
     expect(fila(page, sku)).to_contain_text("Monitor 27")
